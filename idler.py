@@ -13,7 +13,6 @@ IDLED_AT = 'mojanalytics.xyz/idled-at'
 UNIDLER = 'unidler'
 
 
-api = None
 log = logging.getLogger(__name__)
 
 
@@ -23,7 +22,7 @@ def idle_deployments():
 
 
 def eligible_deployments():
-    deployments = api.list_deployment_for_all_namespaces(
+    deployments = client.AppsV1beta1Api().list_deployment_for_all_namespaces(
         label_selector=f'!{IDLED},app=rstudio')
     return filter(eligible, deployments.items)
 
@@ -57,7 +56,7 @@ def redirect_to_unidler(deployment):
 
 
 def get_deployment_ingress(deployment):
-    return api.read_namespaced_ingress(
+    return client.ExtensionsV1beta1Api().read_namespaced_ingress(
         deployment.metadata.name,
         deployment.metadata.namespace)
 
@@ -67,7 +66,7 @@ def set_unidler_backend(ingress):
 
 
 def write_ingress_changes(ingress):
-    api.patch_namespaced_ingress(
+    client.ExtensionsV1beta1Api().patch_namespaced_ingress(
         ingress.metadata.name,
         ingress.metadata.namespace,
         ingress)
@@ -78,7 +77,7 @@ def zero_replicas(deployment):
 
 
 def write_changes(deployment):
-    api.patch_namespaced_deployment(
+    client.AppsV1beta1Api().patch_namespaced_deployment(
         deployment.metadata.name,
         deployment.metadata.namespace,
         deployment)
@@ -89,7 +88,5 @@ if __name__ == '__main__':
         config.load_incluster_config()
     except:
         config.load_kube_config()
-
-    api = client.AppsV1beta1Api()
 
     idle_deployments()
