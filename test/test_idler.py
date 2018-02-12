@@ -4,7 +4,7 @@ from unittest import mock
 import pytest
 
 import idler
-from idler import IDLED, IDLED_AT
+from idler import IDLED, IDLED_AT, UNIDLER
 
 
 @pytest.yield_fixture
@@ -20,27 +20,29 @@ def current_time():
 def deployment():
     deployment = mock.MagicMock()
     deployment.metadata.annotations = {}
-    deployment.metadata.labels = {}
+    deployment.metadata.labels = {'app': 'rstudio'}
     deployment.spec.replicas = expected_replicas = 2
     return deployment
 
 
 @pytest.yield_fixture
-def api(deployment):
-    api = mock.MagicMock()
-    api.list_deployment_for_all_namespaces.return_value.items = [
+def client(deployment):
+    client = mock.MagicMock()
+    apps_api = client.AppsV1beta1Api.return_value
+    apps_api.list_deployment_for_all_namespaces.return_value.items = [
         deployment,
     ]
-    with mock.patch('idler.api', api):
-        yield api
+    with mock.patch('idler.client', client):
+        yield client
 
 
 def test_eligible(deployment):
     assert idler.eligible(deployment)
 
 
-def test_eligible_deployments(api):
+def test_eligible_deployments(client):
     deployments = idler.eligible_deployments()
+    api = client.AppsV1beta1Api.return_value
     api.list_deployment_for_all_namespaces.assert_called_with(
         label_selector=f'!{IDLED},app=rstudio')
     assert len(list(deployments)) > 0
@@ -58,8 +60,35 @@ def test_mark_idled(deployment, current_time):
     assert timestamp == current_time.isoformat(timespec='seconds')
 
 
-def test_redirect_to_unidler():
-    pass
+def test_get_deployment_ingress(client, deployment):
+    idler.get_deployment_ingress(deployment)
+
+    api = client.ExtensionsV1beta1Api.return_value
+    api.read_namespaced_ingress.assert_called_with(
+        deployment.metadata.name,
+        deployment.metadata.namespace)
+
+
+def test_set_unidler_backend():
+    ingress = mock.MagicMock()
+    ingress.spec.rules = [mock.MagicMock()]
+    ingress.spec.rules[0].http.paths = [mock.MagicMock()]
+
+    idler.set_unidler_backend(ingress)
+
+    assert ingress.spec.rules[0].http.paths[0].backend.serviceName == UNIDLER
+
+
+def test_write_ingress_changes(client):
+    ingress = mock.MagicMock()
+
+    idler.write_ingress_changes(ingress)
+
+    api = client.ExtensionsV1beta1Api.return_value
+    api.patch_namespaced_ingress.assert_called_with(
+        ingress.metadata.name,
+        ingress.metadata.namespace,
+        ingress)
 
 
 def test_zero_replicas(deployment):
@@ -68,9 +97,10 @@ def test_zero_replicas(deployment):
     assert deployment.spec.replicas == 0
 
 
-def test_write_changes(api, deployment):
+def test_write_changes(client, deployment):
     idler.write_changes(deployment)
 
+    api = client.AppsV1beta1Api.return_value
     api.patch_namespaced_deployment.assert_called_with(
         deployment.metadata.name,
         deployment.metadata.namespace,
