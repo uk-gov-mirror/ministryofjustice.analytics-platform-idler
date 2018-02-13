@@ -36,16 +36,38 @@ def client(deployment):
         yield client
 
 
-def test_eligible(deployment):
+@pytest.yield_fixture
+def env():
+    env = {}
+    with mock.patch('idler.os') as mock_os:
+        mock_os.environ = env
+        yield env
+
+
+def test_eligible(deployment, env):
     assert idler.eligible(deployment)
 
 
-def test_eligible_deployments(client):
+def test_eligible_deployments(client, env):
     deployments = idler.eligible_deployments()
     api = client.AppsV1beta1Api.return_value
     api.list_deployment_for_all_namespaces.assert_called_with(
         label_selector=f'!{IDLED},app=rstudio')
     assert len(list(deployments)) > 0
+
+
+@pytest.mark.parametrize('label_selector, expected', [
+    ('foo', f'!{IDLED},foo'),
+    ('foo=bar', f'!{IDLED},foo=bar'),
+    ('!foo', f'!{IDLED},!foo'),
+    ('', f'!{IDLED}'),
+])
+def test_label_selector(client, env, label_selector, expected):
+    env['LABEL_SELECTOR'] = label_selector
+    deployments = idler.eligible_deployments()
+    api = client.AppsV1beta1Api.return_value
+    api.list_deployment_for_all_namespaces.assert_called_with(
+        label_selector=expected)
 
 
 def test_mark_idled(deployment, current_time):

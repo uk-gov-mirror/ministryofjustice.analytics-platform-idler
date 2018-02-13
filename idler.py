@@ -4,6 +4,7 @@ Checks all RStudio deployments and idles those matching criteria
 
 from datetime import datetime, timezone
 import logging
+import os
 
 from kubernetes import client, config
 
@@ -22,8 +23,10 @@ def idle_deployments():
 
 
 def eligible_deployments():
+    label_selector = os.environ.get('LABEL_SELECTOR', 'app=rstudio')
+    label_selector = f',{label_selector}' if label_selector else ''
     deployments = client.AppsV1beta1Api().list_deployment_for_all_namespaces(
-        label_selector=f'!{IDLED},app=rstudio')
+        label_selector=f'!{IDLED}{label_selector}')
     return filter(eligible, deployments.items)
 
 
