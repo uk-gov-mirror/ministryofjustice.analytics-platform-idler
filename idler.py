@@ -1,9 +1,15 @@
 """
-Checks all RStudio deployments and idles those matching criteria
+Checks all RStudio deployments and idles those matching a kubernetes label
+selector.
+The label selector can be overridden by setting the LABEL_SELECTOR environment
+variable.
+See https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
+for label selector syntax.
 """
 
 from datetime import datetime, timezone
 import logging
+import os
 
 from kubernetes import client, config
 
@@ -22,13 +28,10 @@ def idle_deployments():
 
 
 def eligible_deployments():
-    deployments = client.AppsV1beta1Api().list_deployment_for_all_namespaces(
-        label_selector=f'!{IDLED},app=rstudio')
-    return filter(eligible, deployments.items)
-
-
-def eligible(deployment):
-    return True
+    label_selector = os.environ.get('LABEL_SELECTOR', 'app=rstudio')
+    label_selector = f',{label_selector}' if label_selector else ''
+    return client.AppsV1beta1Api().list_deployment_for_all_namespaces(
+        label_selector=f'!{IDLED}{label_selector}').items
 
 
 def idle(deployment):
