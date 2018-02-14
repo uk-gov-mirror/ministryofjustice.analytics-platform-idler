@@ -44,10 +44,6 @@ def env():
         yield env
 
 
-def test_eligible(deployment, env):
-    assert idler.eligible(deployment)
-
-
 def test_eligible_deployments(client, env):
     deployments = idler.eligible_deployments()
     api = client.AppsV1beta1Api.return_value
