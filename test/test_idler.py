@@ -1,24 +1,24 @@
 from datetime import datetime, timezone
-from unittest import mock
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 import idler
-from idler import IDLED, IDLED_AT, UNIDLER
+from idler import IDLED, IDLED_AT, INGRESS_CLASS, UNIDLER
 
 
 @pytest.yield_fixture
 def current_time():
-    dt = mock.MagicMock()
+    dt = MagicMock()
     now = datetime(2018, 2, 7, 11, 44, 20, tzinfo=timezone.utc)
     dt.now.return_value = now
-    with mock.patch('idler.datetime', dt):
+    with patch('idler.datetime', dt):
         yield now
 
 
 @pytest.fixture
 def deployment():
-    deployment = mock.MagicMock()
+    deployment = MagicMock()
     deployment.metadata.annotations = {}
     deployment.metadata.labels = {'app': 'rstudio'}
     deployment.spec.replicas = expected_replicas = 2
@@ -27,21 +27,66 @@ def deployment():
 
 @pytest.yield_fixture
 def client(deployment):
-    client = mock.MagicMock()
+    client = MagicMock()
     apps_api = client.AppsV1beta1Api.return_value
     apps_api.list_deployment_for_all_namespaces.return_value.items = [
         deployment,
     ]
-    with mock.patch('idler.client', client):
+    with patch('idler.client', client):
         yield client
 
 
 @pytest.yield_fixture
 def env():
     env = {}
-    with mock.patch('idler.os') as mock_os:
+    with patch('idler.os') as mock_os:
         mock_os.environ = env
         yield env
+
+
+@pytest.fixture
+def unidler():
+    unidler = MagicMock()
+    unidler.spec.rules = [
+        MagicMock(),
+    ]
+    return unidler
+
+
+@pytest.yield_fixture
+def ingress_lookup(deployment, unidler):
+    lookup = {
+        (UNIDLER, 'default'): unidler,
+        (deployment.metadata.name, deployment.metadata.namespace): MagicMock(),
+    }
+    with patch.dict('idler.ingress_lookup', lookup):
+        yield lookup
+
+
+def test_idle_deployments(client, deployment, env, ingress_lookup):
+    deployment_ingress = ingress_lookup[(
+        deployment.metadata.name, deployment.metadata.namespace)]
+    unidler_ingress = ingress_lookup[(UNIDLER, 'default')]
+    extensions_api = client.ExtensionsV1beta1Api.return_value
+    apps_api = client.AppsV1beta1Api.return_value
+
+    idler.idle_deployments()
+
+    extensions_api.patch_namespaced_ingress.assert_has_calls([
+        call(
+            deployment_ingress.metadata.name,
+            deployment_ingress.metadata.namespace,
+            deployment_ingress),
+        call(
+            unidler_ingress.metadata.name,
+            unidler_ingress.metadata.namespace,
+            unidler_ingress),
+    ], any_order=True)
+    apps_api.patch_namespaced_deployment.assert_called_with(
+        deployment.metadata.name,
+        deployment.metadata.namespace,
+        deployment)
+
 
 
 def test_eligible_deployments(client, env):
@@ -78,27 +123,40 @@ def test_mark_idled(deployment, current_time):
     assert timestamp == current_time.isoformat(timespec='seconds')
 
 
-def test_get_deployment_ingress(client, deployment):
-    idler.get_deployment_ingress(deployment)
-
+def test_build_ingress_lookup(client, ingress_lookup):
     api = client.ExtensionsV1beta1Api.return_value
-    api.read_namespaced_ingress.assert_called_with(
-        deployment.metadata.name,
-        deployment.metadata.namespace)
+    api.list_ingress_for_all_namespaces.return_value.items = (
+        ingress_lookup.values())
+
+    idler.build_ingress_lookup()
+
+    api.list_ingress_for_all_namespaces.assert_called()
+
+    assert len(ingress_lookup.items()) == 2
 
 
-def test_set_unidler_backend():
-    ingress = mock.MagicMock()
-    ingress.spec.rules = [mock.MagicMock()]
-    ingress.spec.rules[0].http.paths = [mock.MagicMock()]
+def test_disable_ingress():
+    ingress = MagicMock()
+    ingress.metadata.annotations = {}
 
-    idler.set_unidler_backend(ingress)
+    idler.disable_ingress(ingress)
 
-    assert ingress.spec.rules[0].http.paths[0].backend.serviceName == UNIDLER
+    assert ingress.metadata.annotations[INGRESS_CLASS] == 'disabled'
+
+
+def test_add_host_rule(deployment, ingress_lookup, unidler):
+    ingress = ingress_lookup[(
+        deployment.metadata.name, deployment.metadata.namespace)]
+
+    idler.add_host_rule(unidler, ingress)
+
+    assert len(unidler.spec.rules) == 2
+    assert unidler.spec.rules[1].host == ingress.spec.rules[0].host
+    assert unidler.spec.rules[1].http.paths[0].backend.service_name == UNIDLER
 
 
 def test_write_ingress_changes(client):
-    ingress = mock.MagicMock()
+    ingress = MagicMock()
 
     idler.write_ingress_changes(ingress)
 
