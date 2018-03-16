@@ -23,14 +23,23 @@ from kubernetes.client.models import (
 import metrics_api
 
 
+log = logging.getLogger(__name__)
+
+
 ACTIVE_INSTANCE_CPU_PERCENTAGE = 90
+try:
+    ACTIVE_INSTANCE_CPU_PERCENTAGE = int(os.environ.get(
+        'RSTUDIO_ACTIVITY_CPU_THRESHOLD', 90))
+except ValueError:
+    log.warning(
+        'Invalid value for RSTUDIO_ACTIVITY_CPU_THRESHOLD, using default')
+
 IDLED = 'mojanalytics.xyz/idled'
 IDLED_AT = 'mojanalytics.xyz/idled-at'
 INGRESS_CLASS = 'kubernetes.io/ingress.class'
 UNIDLER = 'unidler'
 
 
-log = logging.getLogger(__name__)
 ingress_lookup = {}
 metrics_lookup = {}
 
