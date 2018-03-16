@@ -80,8 +80,6 @@ def metrics(deployment):
         (deployment.metadata.name, deployment.metadata.namespace): metric,
     }
     with patch('idler.metrics_lookup', cache):
-        print('metrics fixture')
-        print(cache)
         yield cache
 
 
@@ -151,15 +149,7 @@ def test_should_not_idle(deployment):
 ])
 def test_avg_cpu_percent(deployment, metrics, cpu_usage, expected):
     key = (deployment.metadata.name, deployment.metadata.namespace)
-
-    print('test_avg_cpu_percent')
-    print(metrics)
-    print(metrics[key])
     metrics[key] = mock_podmetric(cpu_usage)
-    print('parameter')
-    print(metrics[key])
-    print(metrics[key].containers)
-
     assert idler.avg_cpu_percent(deployment) == expected
 
 
