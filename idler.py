@@ -163,10 +163,14 @@ def write_changes(deployment):
         deployment)
 
 
-if __name__ == '__main__':
+def load_kube_config():
     try:
         config.load_incluster_config()
     except:
+        import k8s_oidc
         config.load_kube_config()
 
+
+if __name__ == '__main__':
+    load_kube_config()
     idle_deployments()
