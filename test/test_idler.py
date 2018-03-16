@@ -131,11 +131,11 @@ def test_label_selector(client, env, label_selector, expected):
         label_selector=expected)
 
 
-def test_should_idle(deployment, metrics):
+def test_should_idle(deployment, env, metrics):
     assert idler.should_idle(deployment)
 
 
-def test_should_not_idle(deployment):
+def test_should_not_idle(deployment, env):
     with patch('idler.avg_cpu_percent') as cpu:
         cpu.return_value = 100
         assert not idler.should_idle(deployment)
