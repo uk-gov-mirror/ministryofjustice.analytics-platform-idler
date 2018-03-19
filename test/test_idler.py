@@ -63,12 +63,33 @@ def ingress_lookup(deployment, unidler):
         yield lookup
 
 
-def test_idle_deployments(client, deployment, env, ingress_lookup):
+def mock_podmetric(cpu_usage=['0']):
+    metric = MagicMock(name='PodMetrics')
+    metric.containers = []
+    for usage in cpu_usage:
+        container = MagicMock(name='Container')
+        container.usage = {'cpu': usage}
+        metric.containers.append(container)
+    return metric
+
+
+@pytest.yield_fixture
+def metrics(deployment):
+    metric = mock_podmetric()
+    cache = {
+        (deployment.metadata.name, deployment.metadata.namespace): metric,
+    }
+    with patch('idler.metrics_lookup', cache):
+        yield cache
+
+
+def test_idle_deployments(client, deployment, env, ingress_lookup, metrics):
     deployment_ingress = ingress_lookup[(
         deployment.metadata.name, deployment.metadata.namespace)]
     unidler_ingress = ingress_lookup[(UNIDLER, 'default')]
     extensions_api = client.ExtensionsV1beta1Api.return_value
     apps_api = client.AppsV1beta1Api.return_value
+    metrics_api = client.MetricsV1beta1Api.return_value
 
     idler.idle_deployments()
 
@@ -86,7 +107,6 @@ def test_idle_deployments(client, deployment, env, ingress_lookup):
         deployment.metadata.name,
         deployment.metadata.namespace,
         deployment)
-
 
 
 def test_eligible_deployments(client, env):
@@ -109,6 +129,28 @@ def test_label_selector(client, env, label_selector, expected):
     api = client.AppsV1beta1Api.return_value
     api.list_deployment_for_all_namespaces.assert_called_with(
         label_selector=expected)
+
+
+def test_should_idle(deployment, env, metrics):
+    assert idler.should_idle(deployment)
+
+
+def test_should_not_idle(deployment, env):
+    with patch('idler.avg_cpu_percent') as cpu:
+        cpu.return_value = 100
+        assert not idler.should_idle(deployment)
+
+
+@pytest.mark.parametrize('cpu_usage, expected', [
+    (['0'], 0),
+    (['0', '0'], 0),
+    (['100m', '0'], 10),
+    (['100m', '100m'], 20),
+])
+def test_avg_cpu_percent(deployment, metrics, cpu_usage, expected):
+    key = (deployment.metadata.name, deployment.metadata.namespace)
+    metrics[key] = mock_podmetric(cpu_usage)
+    assert idler.avg_cpu_percent(deployment) == expected
 
 
 def test_mark_idled(deployment, current_time):

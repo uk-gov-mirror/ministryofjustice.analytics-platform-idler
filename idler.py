@@ -20,6 +20,19 @@ from kubernetes.client.models import (
     V1beta1IngressRule,
 )
 
+import metrics_api
+
+
+log = logging.getLogger(__name__)
+
+
+ACTIVE_INSTANCE_CPU_PERCENTAGE = 90
+try:
+    ACTIVE_INSTANCE_CPU_PERCENTAGE = int(os.environ.get(
+        'RSTUDIO_ACTIVITY_CPU_THRESHOLD', 90))
+except ValueError:
+    log.warning(
+        'Invalid value for RSTUDIO_ACTIVITY_CPU_THRESHOLD, using default')
 
 IDLED = 'mojanalytics.xyz/idled'
 IDLED_AT = 'mojanalytics.xyz/idled-at'
@@ -27,16 +40,19 @@ INGRESS_CLASS = 'kubernetes.io/ingress.class'
 UNIDLER = 'unidler'
 
 
-log = logging.getLogger(__name__)
 ingress_lookup = {}
+metrics_lookup = {}
 
 
 def idle_deployments():
     build_ingress_lookup()
 
     with ingress(UNIDLER, 'default') as unidler:
+        build_metrics_lookup()
+
         for deployment in eligible_deployments():
-            idle(deployment, unidler)
+            if should_idle(deployment):
+                idle(deployment, unidler)
 
 
 @contextlib.contextmanager
@@ -52,13 +68,48 @@ def build_ingress_lookup():
         ingress_lookup[(i.metadata.name, i.metadata.namespace)] = i
 
 
+def build_metrics_lookup():
+    metrics = client.MetricsV1beta1Api().list_pod_metrics_for_all_namespaces(
+        label_selector=f'!{IDLED},{label_selector()}')
+    for i in metrics.items:
+        metrics_lookup[(i.metadata.name, i.metadata.namespace)] = i
+
+
 def eligible_deployments():
+    return client.AppsV1beta1Api().list_deployment_for_all_namespaces(
+        label_selector=f'!{IDLED}{label_selector()}').items
+
+
+def label_selector():
     label_selector = os.environ.get('LABEL_SELECTOR', 'app=rstudio')
     if label_selector:
         label_selector = ',' + label_selector
+    return label_selector
 
-    return client.AppsV1beta1Api().list_deployment_for_all_namespaces(
-        label_selector=f'!{IDLED}{label_selector}').items
+
+def should_idle(deployment):
+    usage = avg_cpu_percent(deployment)
+    if usage > ACTIVE_INSTANCE_CPU_PERCENTAGE:
+        logging.info(
+            f'Not idling {deployment.metadata.name} '
+            f'in {deployment.metadata.namespace} as CPU at {usage}%')
+        return False
+
+    return True
+
+
+def avg_cpu_percent(deployment):
+    metrics = metrics_lookup[
+        (deployment.metadata.name, deployment.metadata.namespace)]
+
+    usage = 0
+
+    for container in metrics.containers:
+        # cpu usage is reported in millicpus with suffix 'm'
+        usage += int(container.usage['cpu'].strip('m'), 10)
+
+    # convert millicpus to cpu percentage
+    return usage / 10
 
 
 def idle(deployment, unidler):
@@ -123,10 +174,14 @@ def write_changes(deployment):
         deployment)
 
 
-if __name__ == '__main__':
+def load_kube_config():
     try:
         config.load_incluster_config()
     except:
+        import k8s_oidc
         config.load_kube_config()
 
+
+if __name__ == '__main__':
+    load_kube_config()
     idle_deployments()
