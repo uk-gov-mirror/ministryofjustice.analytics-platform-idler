@@ -105,8 +105,10 @@ def avg_cpu_percent(deployment):
     usage = 0
 
     for container in metrics.containers:
+        # cpu usage is reported in millicpus with suffix 'm'
         usage += int(container.usage['cpu'].strip('m'), 10)
 
+    # convert millicpus to cpu percentage
     return usage / 10
 
 
