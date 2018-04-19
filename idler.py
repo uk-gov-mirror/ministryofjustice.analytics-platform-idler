@@ -42,14 +42,13 @@ UNIDLER = 'unidler'
 
 ingress_lookup = {}
 metrics_lookup = {}
+pods_lookup = {}
 
 
 def idle_deployments():
-    build_ingress_lookup()
+    build_lookups()
 
     with ingress(UNIDLER, 'default') as unidler:
-        build_metrics_lookup()
-
         for deployment in eligible_deployments():
             if should_idle(deployment):
                 idle(deployment, unidler)
@@ -70,9 +69,27 @@ def build_ingress_lookup():
 
 def build_metrics_lookup():
     metrics = client.MetricsV1beta1Api().list_pod_metrics_for_all_namespaces(
-        label_selector=f'!{IDLED},{label_selector()}')
-    for i in metrics.items:
-        metrics_lookup[(i.metadata.name, i.metadata.namespace)] = i
+        label_selector=f'!{IDLED}{label_selector()}')
+
+    for pod_metrics in metrics.items:
+        pod_name = pod_metrics.metadata.name
+        namespace = pod_metrics.metadata.namespace
+        pod = pods_lookup[(pod_name, namespace)]
+        app_name = pod.metadata.labels['app']
+
+        metrics_lookup[(app_name, namespace)] = pod_metrics
+
+
+def build_pods_lookup():
+    pods = client.CoreV1Api().list_pod_for_all_namespaces(label_selector=f'!{IDLED}{label_selector()}')
+    for pod in pods.items:
+        pods_lookup[(pod.metadata.name, pod.metadata.namespace)] = pod
+
+
+def build_lookups():
+    build_pods_lookup()
+    build_metrics_lookup()
+    build_ingress_lookup()
 
 
 def eligible_deployments():
@@ -98,18 +115,25 @@ def should_idle(deployment):
     return True
 
 
+def millicpu_to_int(millicpu):
+    # millicpus have the 'm' suffix
+    return int(millicpu.strip('m'), 10)
+
+
 def avg_cpu_percent(deployment):
-    metrics = metrics_lookup[
-        (deployment.metadata.name, deployment.metadata.namespace)]
+    app_name = deployment.metadata.labels['app']
+    namespace = deployment.metadata.namespace
+    metrics = metrics_lookup[(app_name, namespace)]
 
     usage = 0
-
     for container in metrics.containers:
-        # cpu usage is reported in millicpus with suffix 'm'
-        usage += int(container.usage['cpu'].strip('m'), 10)
+        usage += millicpu_to_int(container.usage['cpu'])
 
-    # convert millicpus to cpu percentage
-    return usage / 10
+    total = 0
+    for container in deployment.spec.template.spec.containers:
+        total += millicpu_to_int(container.resources.limits['cpu'])
+
+    return usage / total * 100.0
 
 
 def idle(deployment, unidler):
