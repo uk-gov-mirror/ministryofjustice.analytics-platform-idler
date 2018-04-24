@@ -16,22 +16,49 @@ def current_time():
         yield now
 
 
+def mock_container(cpu_limit):
+    container = MagicMock()
+    container.resources.limits = {'cpu': cpu_limit}
+
+    return container
+
+
 @pytest.fixture
 def deployment():
     deployment = MagicMock()
     deployment.metadata.annotations = {}
     deployment.metadata.labels = {'app': 'rstudio'}
+    deployment.metadata.namespace = 'user-alice'
     deployment.spec.replicas = expected_replicas = 2
+    deployment.spec.template.spec.containers = [
+        mock_container(cpu_limit='100m'),
+        mock_container(cpu_limit='1500m'),
+    ]
     return deployment
 
 
+@pytest.fixture
+def pod():
+    pod = MagicMock()
+    pod.metadata.name = 'rstudio-whatever-1234-abcde'
+    pod.metadata.labels = {'app': 'rstudio'}
+    pod.metadata.namespace = 'user-alice'
+    return pod
+
+
 @pytest.yield_fixture
-def client(deployment):
+def client(deployment, pod):
     client = MagicMock()
     apps_api = client.AppsV1beta1Api.return_value
     apps_api.list_deployment_for_all_namespaces.return_value.items = [
         deployment,
     ]
+
+    pods_api = client.CoreV1Api.return_value
+    pods_api.list_pod_for_all_namespaces.return_value.items = [
+        pod,
+    ]
+
     with patch('idler.client', client):
         yield client
 
@@ -77,9 +104,18 @@ def mock_podmetric(cpu_usage=['0']):
 def metrics(deployment):
     metric = mock_podmetric()
     cache = {
-        (deployment.metadata.name, deployment.metadata.namespace): metric,
+        (deployment.metadata.labels['app'], deployment.metadata.namespace): metric,
     }
     with patch('idler.metrics_lookup', cache):
+        yield cache
+
+
+@pytest.yield_fixture
+def pods_lookup(pod):
+    cache = {
+        (pod.metadata.labels['app'], pod.metadata.namespace): pod,
+    }
+    with patch('idler.pods_lookup', cache):
         yield cache
 
 
@@ -144,11 +180,11 @@ def test_should_not_idle(deployment, env):
 @pytest.mark.parametrize('cpu_usage, expected', [
     (['0'], 0),
     (['0', '0'], 0),
-    (['100m', '0'], 10),
-    (['100m', '100m'], 20),
+    (['100m', '0'], 6.25), # 100 / (1500+100)
+    (['100m', '100m'], 12.5), # 200 / (1500+100)
 ])
-def test_avg_cpu_percent(deployment, metrics, cpu_usage, expected):
-    key = (deployment.metadata.name, deployment.metadata.namespace)
+def test_avg_cpu_percent(client, deployment, pods_lookup, metrics, cpu_usage, expected):
+    key = (deployment.metadata.labels['app'], deployment.metadata.namespace)
     metrics[key] = mock_podmetric(cpu_usage)
     assert idler.avg_cpu_percent(deployment) == expected
 
