@@ -23,7 +23,14 @@ from kubernetes.client.models import (
 import metrics_api
 
 
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
+
 log = logging.getLogger(__name__)
+log.setLevel(LOG_LEVEL)
+log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+log_handler = logging.StreamHandler()
+log_handler.setFormatter(log_formatter)
+log.addHandler(log_handler)
 
 
 ACTIVE_INSTANCE_CPU_PERCENTAGE = 90
@@ -107,7 +114,7 @@ def label_selector():
 def should_idle(deployment):
     usage = avg_cpu_percent(deployment)
     if usage > ACTIVE_INSTANCE_CPU_PERCENTAGE:
-        logging.info(
+        log.info(
             f'Not idling {deployment.metadata.name} '
             f'in {deployment.metadata.namespace} as CPU at {usage}%')
         return False
@@ -123,7 +130,13 @@ def millicpu_to_int(millicpu):
 def avg_cpu_percent(deployment):
     app_name = deployment.metadata.labels['app']
     namespace = deployment.metadata.namespace
-    metrics = metrics_lookup[(app_name, namespace)]
+    try:
+        metrics = metrics_lookup[(app_name, namespace)]
+    except KeyError as e:
+        log.warning(
+            f'metrics for ({app_name}, {namespace}) not found.'
+            ' Pod may be unhealthy.')
+        return 0
 
     usage = 0
     for container in metrics.containers:
