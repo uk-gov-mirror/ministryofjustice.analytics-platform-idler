@@ -8,5 +8,6 @@ ADD requirements.txt requirements.txt
 RUN pip install -r requirements.txt
 
 ADD idler.py idler.py
+ADD metrics_api.py metrics_api.py
 
 CMD ["python", "idler.py"]
