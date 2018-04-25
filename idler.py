@@ -130,7 +130,13 @@ def millicpu_to_int(millicpu):
 def avg_cpu_percent(deployment):
     app_name = deployment.metadata.labels['app']
     namespace = deployment.metadata.namespace
-    metrics = metrics_lookup[(app_name, namespace)]
+    try:
+        metrics = metrics_lookup[(app_name, namespace)]
+    except KeyError as e:
+        log.warning(
+            f'metrics for ({app_name}, {namespace}) not found.'
+            ' Pod may be unhealthy.')
+        return 0
 
     usage = 0
     for container in metrics.containers:
