@@ -37,6 +37,7 @@ ACTIVE_INSTANCE_CPU_PERCENTAGE = 90
 try:
     ACTIVE_INSTANCE_CPU_PERCENTAGE = int(os.environ.get(
         'RSTUDIO_ACTIVITY_CPU_THRESHOLD', 90))
+    log.debug(f'RSTUDIO_ACTIVITY_CPU_THRESHOLD={ACTIVE_INSTANCE_CPU_PERCENTAGE}%')
 except ValueError:
     log.warning(
         'Invalid value for RSTUDIO_ACTIVITY_CPU_THRESHOLD, using default')
@@ -59,6 +60,12 @@ def idle_deployments():
         for deployment in eligible_deployments():
             if should_idle(deployment):
                 idle(deployment, unidler)
+
+def get_key(pod_or_deployment):
+    return (
+        pod_or_deployment.metadata.labels['app'],
+        pod_or_deployment.metadata.namespace,
+    )
 
 
 @contextlib.contextmanager
@@ -106,6 +113,7 @@ def eligible_deployments():
 
 def label_selector():
     label_selector = os.environ.get('LABEL_SELECTOR', 'app=rstudio')
+    log.debug(f'LABEL_SELECTOR="{label_selector}"')
     if label_selector:
         label_selector = ',' + label_selector
     return label_selector
@@ -113,10 +121,12 @@ def label_selector():
 
 def should_idle(deployment):
     usage = avg_cpu_percent(deployment)
+
+    key = get_key(deployment)
+    log.debug(f'{key}: Using {usage}% of CPU')
+
     if usage > ACTIVE_INSTANCE_CPU_PERCENTAGE:
-        log.info(
-            f'Not idling {deployment.metadata.name} '
-            f'in {deployment.metadata.namespace} as CPU at {usage}%')
+        log.info(f'{key}: Not idling as using {usage}% of CPU')
         return False
 
     return True
@@ -128,14 +138,11 @@ def millicpu_to_int(millicpu):
 
 
 def avg_cpu_percent(deployment):
-    app_name = deployment.metadata.labels['app']
-    namespace = deployment.metadata.namespace
+    key = get_key(deployment)
     try:
-        metrics = metrics_lookup[(app_name, namespace)]
+        metrics = metrics_lookup[key]
     except KeyError as e:
-        log.warning(
-            f'metrics for ({app_name}, {namespace}) not found.'
-            ' Pod may be unhealthy.')
+        log.warning(f'{key}: Metrics not found, pod may be unhealthy.')
         return 0
 
     usage = 0
@@ -154,10 +161,8 @@ def idle(deployment, unidler):
     redirect_to_unidler(deployment, unidler)
     zero_replicas(deployment)
     write_changes(deployment)
-    log.debug(
-        f'{deployment.metadata.name} '
-        f'in namespace {deployment.metadata.namespace} '
-        f'idled')
+
+    log.debug(f'{get_key(deployment)}: Idled')
 
 
 def mark_idled(deployment):
