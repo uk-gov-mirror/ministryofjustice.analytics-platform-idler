@@ -77,6 +77,8 @@ def unidler():
     unidler.spec.rules = [
         MagicMock(),
     ]
+    unidler.spec.tls = [MagicMock()]
+    unidler.spec.tls[0].hosts = []
     return unidler
 
 
@@ -231,6 +233,7 @@ def test_add_host_rule(deployment, ingress_lookup, unidler):
     assert len(unidler.spec.rules) == 2
     assert unidler.spec.rules[1].host == ingress.spec.rules[0].host
     assert unidler.spec.rules[1].http.paths[0].backend.service_name == UNIDLER
+    assert ingress.spec.rules[0].host in unidler.spec.tls[0].hosts
 
 
 def test_write_ingress_changes(client):
