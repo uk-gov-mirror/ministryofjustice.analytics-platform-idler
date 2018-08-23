@@ -186,16 +186,20 @@ def disable_ingress(ingress):
 
 
 def add_host_rule(unidler, ingress):
+    # XXX assumption: ingress has rules and first one is relevant
+    hostname = ingress.spec.rules[0].host
     unidler.spec.rules.append(
         V1beta1IngressRule(
-            # XXX assumption: ingress has rules and first one is relevant
-            host=ingress.spec.rules[0].host,
+            host=hostname,
             http=V1beta1HTTPIngressRuleValue(
                 paths=[
                     V1beta1HTTPIngressPath(
                         backend=V1beta1IngressBackend(
                             service_name=UNIDLER,
                             service_port=80))])))
+    # ensure the host is listed in tls hosts
+    if hostname not in unidler.spec.tls[0].hosts:
+        unidler.spec.tls[0].hosts.append(hostname)
 
 
 def write_ingress_changes(ingress):
