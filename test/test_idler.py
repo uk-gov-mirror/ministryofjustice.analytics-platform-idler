@@ -2,9 +2,29 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+from hypothesis import given, settings
+from hypothesis.strategies import integers, text, composite
 
 import idler
 from idler import IDLED, IDLED_AT, INGRESS_CLASS, UNIDLER
+
+
+@composite
+def cpu_usage(draw):
+    n = draw(integers(min_value=1))
+    u = draw(text(alphabet='mn', max_size=1, min_size=1))
+    return f'{n}{u}'
+
+
+@given(cpu_usage())
+@settings(max_examples=1500)
+def test_parse_cpuusage(cpu: str):
+    out = 0
+    if cpu.endswith('n'):
+        out = int(cpu.rstrip('n')) / 1000000
+    elif cpu.endswith('m'):
+        out = int(cpu.rstrip('m'))
+    assert idler.core_val_with_unit_to_int(cpu) == out
 
 
 @pytest.yield_fixture
@@ -92,7 +112,9 @@ def ingress_lookup(deployment, unidler):
         yield lookup
 
 
-def mock_podmetric(cpu_usage=['0']):
+def mock_podmetric(cpu_usage=None):
+    if cpu_usage is None:
+        cpu_usage = ['0']
     metric = MagicMock(name='PodMetrics')
     metric.containers = []
     for usage in cpu_usage:
@@ -182,8 +204,13 @@ def test_should_not_idle(deployment, env):
 @pytest.mark.parametrize('cpu_usage, expected', [
     (['0'], 0),
     (['0', '0'], 0),
-    (['100m', '0'], 6.25), # 100 / (1500+100)
-    (['100m', '100m'], 12.5), # 200 / (1500+100)
+    (['100m', '0'], 6.25),  # 100 / (1500+100)
+    (['100m', '100m'], 12.5),  # 200 / (1500+100)
+    (['100m', '100000000n'], 12.5),  # mixed units # 200 / (1500+100)
+    (['100000000n', '0'], 6.25),
+    (['100000000n', '100m'], 12.5),
+    (['100000000n', '100000000n'], 12.5),
+    (['100m', '100000000n'], 12.5),
 ])
 def test_avg_cpu_percent(client, deployment, pods_lookup, metrics, cpu_usage, expected):
     key = (deployment.metadata.labels['app'], deployment.metadata.namespace)

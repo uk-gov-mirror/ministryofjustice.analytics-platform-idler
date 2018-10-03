@@ -61,7 +61,7 @@ class MetricsV1beta1Api(object):
             files=local_var_files,
             response_type='MetricsV1beta1PodMetricsList',
             auth_settings=auth_settings,
-            async=kwargs.get('async'),
+            async_req=kwargs.get('async_req'),
             _return_http_data_only=kwargs.get('_return_http_data_only'),
             _preload_content=kwargs.get('_preload_content', True),
             _request_timeout=kwargs.get('_request_timeout'),

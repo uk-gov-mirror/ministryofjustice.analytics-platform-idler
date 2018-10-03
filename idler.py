@@ -132,9 +132,16 @@ def should_idle(deployment):
     return True
 
 
-def millicpu_to_int(millicpu):
+def core_val_with_unit_to_int(core_val_with_unit: str):
     # millicpus have the 'm' suffix
-    return int(millicpu.strip('m'), 10)
+    if core_val_with_unit.endswith('m'):
+        return int(core_val_with_unit.rstrip('m'), 10)
+    elif core_val_with_unit.endswith('n'):
+        # nanocpus have the 'n' suffix
+        return int(core_val_with_unit.rstrip('n'), 10) / 1000000
+    else:
+        # if the result is 0 then there is no suffix
+        return int(core_val_with_unit, 10)
 
 
 def avg_cpu_percent(deployment):
@@ -147,11 +154,11 @@ def avg_cpu_percent(deployment):
 
     usage = 0
     for container in metrics.containers:
-        usage += millicpu_to_int(container.usage['cpu'])
+        usage += core_val_with_unit_to_int(container.usage['cpu'])
 
     total = 0
     for container in deployment.spec.template.spec.containers:
-        total += millicpu_to_int(container.resources.limits['cpu'])
+        total += core_val_with_unit_to_int(container.resources.limits['cpu'])
 
     return usage / total * 100.0
 
