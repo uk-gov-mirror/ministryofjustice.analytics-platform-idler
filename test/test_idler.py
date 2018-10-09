@@ -12,7 +12,7 @@ from idler import IDLED, IDLED_AT, INGRESS_CLASS, UNIDLER
 @composite
 def cpu_usage(draw):
     n = draw(integers(min_value=1))
-    u = draw(text(alphabet='mn', max_size=1, min_size=1))
+    u = draw(text(alphabet='mnu', max_size=1, min_size=1))
     return f'{n}{u}'
 
 
@@ -24,6 +24,8 @@ def test_parse_cpuusage(cpu: str):
         out = int(cpu.rstrip('n')) / 1000000
     elif cpu.endswith('m'):
         out = int(cpu.rstrip('m'))
+    elif cpu.endswith('u'):
+        out = int(cpu.rstrip('u')) / 1000
     assert idler.core_val_with_unit_to_int(cpu) == out
 
 
@@ -211,6 +213,10 @@ def test_should_not_idle(deployment, env):
     (['100000000n', '100m'], 12.5),
     (['100000000n', '100000000n'], 12.5),
     (['100m', '100000000n'], 12.5),
+    (['100000u', '0'], 6.25),
+    (['100000u', '100m'], 12.5),
+    (['100000u', '100000000n'], 12.5),
+    (['100m', '100000u'], 12.5),
 ])
 def test_avg_cpu_percent(client, deployment, pods_lookup, metrics, cpu_usage, expected):
     key = (deployment.metadata.labels['app'], deployment.metadata.namespace)
