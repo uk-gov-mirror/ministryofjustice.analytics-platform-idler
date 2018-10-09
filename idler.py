@@ -120,9 +120,14 @@ def label_selector():
 
 
 def should_idle(deployment):
-    usage = avg_cpu_percent(deployment)
-
+    usage = 0
     key = get_key(deployment)
+
+    try:
+        usage = avg_cpu_percent(deployment)
+    except ValueError as ve:
+        log.exception(f'{key}: Using unknown unit of CPU: {ve}', exc_info=True)
+
     log.debug(f'{key}: Using {usage}% of CPU')
 
     if usage > ACTIVE_INSTANCE_CPU_PERCENTAGE:
@@ -139,6 +144,9 @@ def core_val_with_unit_to_int(core_val_with_unit: str):
     elif core_val_with_unit.endswith('n'):
         # nanocpus have the 'n' suffix
         return int(core_val_with_unit.rstrip('n'), 10) / 1000000
+    elif core_val_with_unit.endswith('u'):
+        # microcpus (μ)
+        return int(core_val_with_unit.rstrip('u'), 10) / 1000
     else:
         # if the result is 0 then there is no suffix
         return int(core_val_with_unit, 10)
