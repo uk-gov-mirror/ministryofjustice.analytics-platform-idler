@@ -145,7 +145,7 @@ def core_val_with_unit_to_int(core_val_with_unit: str):
         # nanocpus have the 'n' suffix
         return int(core_val_with_unit.rstrip('n'), 10) / 1000000
     elif core_val_with_unit.endswith('u'):
-        # microcpus (ų)
+        # microcpus (μ)
         return int(core_val_with_unit.rstrip('u'), 10) / 1000
     else:
         # if the result is 0 then there is no suffix
