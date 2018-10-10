@@ -108,7 +108,7 @@ def unidler():
 def ingress_lookup(deployment, unidler):
     lookup = {
         (UNIDLER, 'default'): unidler,
-        (deployment.metadata.name, deployment.metadata.namespace): MagicMock(),
+        (deployment.metadata.labels['app'], deployment.metadata.namespace): MagicMock(),
     }
     with patch.dict('idler.ingress_lookup', lookup):
         yield lookup
@@ -147,7 +147,7 @@ def pods_lookup(pod):
 
 def test_idle_deployments(client, deployment, env, ingress_lookup, metrics):
     deployment_ingress = ingress_lookup[(
-        deployment.metadata.name, deployment.metadata.namespace)]
+        deployment.metadata.labels['app'], deployment.metadata.namespace)]
     unidler_ingress = ingress_lookup[(UNIDLER, 'default')]
     extensions_api = client.ExtensionsV1beta1Api.return_value
     apps_api = client.AppsV1beta1Api.return_value
@@ -259,7 +259,7 @@ def test_disable_ingress():
 
 def test_add_host_rule(deployment, ingress_lookup, unidler):
     ingress = ingress_lookup[(
-        deployment.metadata.name, deployment.metadata.namespace)]
+        deployment.metadata.labels['app'], deployment.metadata.namespace)]
 
     idler.add_host_rule(unidler, ingress)
 

@@ -76,9 +76,10 @@ def ingress(name, namespace):
 
 
 def build_ingress_lookup():
-    ingresses = client.ExtensionsV1beta1Api().list_ingress_for_all_namespaces()
+    ingresses = client.ExtensionsV1beta1Api().list_ingress_for_all_namespaces(label_selector='app')
     for i in ingresses.items:
-        ingress_lookup[(i.metadata.name, i.metadata.namespace)] = i
+        if i.metadata.labels and 'app' in i.metadata.labels.keys():
+            ingress_lookup[(i.metadata.labels['app'], i.metadata.namespace)] = i
 
 
 def build_metrics_lookup():
@@ -188,10 +189,10 @@ def mark_idled(deployment):
 
 
 def redirect_to_unidler(deployment, unidler):
-    name = deployment.metadata.name
+    app_name = deployment.metadata.labels['app']
     namespace = deployment.metadata.namespace
 
-    with ingress(name, namespace) as ing:
+    with ingress(app_name, namespace) as ing:
         disable_ingress(ing)
         add_host_rule(unidler, ing)
 
