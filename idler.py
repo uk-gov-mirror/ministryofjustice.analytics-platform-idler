@@ -7,19 +7,14 @@ See https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
 for label selector syntax.
 """
 
-import contextlib
 from datetime import datetime, timezone
+import json
 import logging
 import os
 
 from kubernetes import client, config
-from kubernetes.client.models import (
-    V1beta1HTTPIngressPath,
-    V1beta1HTTPIngressRuleValue,
-    V1beta1IngressBackend,
-    V1beta1IngressRule,
-)
 
+# provides swagger definitions for metrics api
 import metrics_api
 
 
@@ -27,7 +22,8 @@ LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 
 log = logging.getLogger(__name__)
 log.setLevel(LOG_LEVEL)
-log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+log_formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 log_handler = logging.StreamHandler()
 log_handler.setFormatter(log_formatter)
 log.addHandler(log_handler)
@@ -37,18 +33,18 @@ ACTIVE_INSTANCE_CPU_PERCENTAGE = 90
 try:
     ACTIVE_INSTANCE_CPU_PERCENTAGE = int(os.environ.get(
         'RSTUDIO_ACTIVITY_CPU_THRESHOLD', 90))
-    log.debug(f'RSTUDIO_ACTIVITY_CPU_THRESHOLD={ACTIVE_INSTANCE_CPU_PERCENTAGE}%')
+    log.debug(
+        f'RSTUDIO_ACTIVITY_CPU_THRESHOLD={ACTIVE_INSTANCE_CPU_PERCENTAGE}%')
 except ValueError:
     log.warning(
         'Invalid value for RSTUDIO_ACTIVITY_CPU_THRESHOLD, using default')
 
 IDLED = 'mojanalytics.xyz/idled'
 IDLED_AT = 'mojanalytics.xyz/idled-at'
-INGRESS_CLASS = 'kubernetes.io/ingress.class'
-UNIDLER = 'unidler'
+SERVICE_TYPE_EXTERNAL_NAME = "ExternalName"
+UNIDLER_SERVICE_HOST = "unidler.default.svc.cluster.local"
 
 
-ingress_lookup = {}
 metrics_lookup = {}
 pods_lookup = {}
 
@@ -56,30 +52,16 @@ pods_lookup = {}
 def idle_deployments():
     build_lookups()
 
-    with ingress(UNIDLER, 'default') as unidler:
-        for deployment in eligible_deployments():
-            if should_idle(deployment):
-                idle(deployment, unidler)
+    for deployment in eligible_deployments():
+        if should_idle(deployment):
+            idle(deployment)
+
 
 def get_key(pod_or_deployment):
     return (
         pod_or_deployment.metadata.labels['app'],
         pod_or_deployment.metadata.namespace,
     )
-
-
-@contextlib.contextmanager
-def ingress(name, namespace):
-    ingress = ingress_lookup[(name, namespace)]
-    yield ingress
-    write_ingress_changes(ingress)
-
-
-def build_ingress_lookup():
-    ingresses = client.ExtensionsV1beta1Api().list_ingress_for_all_namespaces(label_selector='app')
-    for i in ingresses.items:
-        if i.metadata.labels and 'app' in i.metadata.labels.keys():
-            ingress_lookup[(i.metadata.labels['app'], i.metadata.namespace)] = i
 
 
 def build_metrics_lookup():
@@ -96,7 +78,8 @@ def build_metrics_lookup():
 
 
 def build_pods_lookup():
-    pods = client.CoreV1Api().list_pod_for_all_namespaces(label_selector=f'!{IDLED}{label_selector()}')
+    pods = client.CoreV1Api().list_pod_for_all_namespaces(
+        label_selector=f'!{IDLED}{label_selector()}')
     for pod in pods.items:
         pods_lookup[(pod.metadata.name, pod.metadata.namespace)] = pod
 
@@ -104,7 +87,6 @@ def build_pods_lookup():
 def build_lookups():
     build_pods_lookup()
     build_metrics_lookup()
-    build_ingress_lookup()
 
 
 def eligible_deployments():
@@ -172,9 +154,10 @@ def avg_cpu_percent(deployment):
     return usage / total * 100.0
 
 
-def idle(deployment, unidler):
+def idle(deployment):
     mark_idled(deployment)
-    redirect_to_unidler(deployment, unidler)
+    svc = Service(deployment.metadata.name, deployment.metadata.namespace)
+    svc.redirect_to_unidler()
     zero_replicas(deployment)
     write_changes(deployment)
 
@@ -188,41 +171,36 @@ def mark_idled(deployment):
         f'{timestamp},{deployment.spec.replicas}')
 
 
-def redirect_to_unidler(deployment, unidler):
-    app_name = deployment.metadata.labels['app']
-    namespace = deployment.metadata.namespace
+class Service(object):
 
-    with ingress(app_name, namespace) as ing:
-        disable_ingress(ing)
-        add_host_rule(unidler, ing)
+    def __init__(self, name, namespace):
+        self.name = name
+        self.namespace = namespace
+        self.service = client.CoreV1Api().read_namespaced_service(
+            name, namespace)
 
+    def patch(self, *patch):
+        client.CoreV1Api().patch_namespaced_service(
+            name=self.name,
+            namespace=self.namespace,
+            body=json.dumps(patch))
 
-def disable_ingress(ingress):
-    ingress.metadata.annotations[INGRESS_CLASS] = 'disabled'
-
-
-def add_host_rule(unidler, ingress):
-    # XXX assumption: ingress has rules and first one is relevant
-    hostname = ingress.spec.rules[0].host
-    unidler.spec.rules.append(
-        V1beta1IngressRule(
-            host=hostname,
-            http=V1beta1HTTPIngressRuleValue(
-                paths=[
-                    V1beta1HTTPIngressPath(
-                        backend=V1beta1IngressBackend(
-                            service_name=UNIDLER,
-                            service_port=80))])))
-    # ensure the host is listed in tls hosts
-    if hostname not in unidler.spec.tls[0].hosts:
-        unidler.spec.tls[0].hosts.append(hostname)
-
-
-def write_ingress_changes(ingress):
-    client.ExtensionsV1beta1Api().patch_namespaced_ingress(
-        ingress.metadata.name,
-        ingress.metadata.namespace,
-        ingress)
+    def redirect_to_unidler(self):
+        self.patch(
+            {
+                "op": "replace",
+                "path": "/spec/type",
+                "value": SERVICE_TYPE_EXTERNAL_NAME},
+            {
+                "op": "add",
+                "path": "/spec/externalName",
+                "value": UNIDLER_SERVICE_HOST},
+            {
+                "op": "remove",
+                "path": "/spec/ports"},
+            {
+                "op": "remove",
+                "path": "/spec/selector"})
 
 
 def zero_replicas(deployment):
@@ -239,7 +217,8 @@ def write_changes(deployment):
 def load_kube_config():
     try:
         config.load_incluster_config()
-    except:
+    except config.ConfigException:
+        # monkeypatch config loader to handle OIDC
         import k8s_oidc
         config.load_kube_config()
 
