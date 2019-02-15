@@ -183,7 +183,7 @@ class Service(object):
         client.CoreV1Api().patch_namespaced_service(
             name=self.name,
             namespace=self.namespace,
-            body=json.dumps(patch))
+            body=list(patch))
 
     def redirect_to_unidler(self):
         self.patch(
@@ -196,11 +196,20 @@ class Service(object):
                 "path": "/spec/externalName",
                 "value": UNIDLER_SERVICE_HOST},
             {
-                "op": "remove",
-                "path": "/spec/ports"},
+                "op": "replace",
+                "path": "/spec/ports",
+                "value": [
+                    {
+                        "name": "http",
+                        "port": 80
+                    }
+                ]},
             {
                 "op": "remove",
-                "path": "/spec/selector"})
+                "path": "/spec/selector"},
+            {
+                "op": "remove",
+                "path": "/spec/clusterIP"})
 
 
 def zero_replicas(deployment):
