@@ -174,8 +174,10 @@ def test_idle_deployments(client, deployment, env, metrics):
                 "path": "/spec/ports",
                 "value": [
                     {
+                        "name": "http",
                         "port": 80,
-                        "name": "http"
+                        "protocol": "TCP",
+                        "targetPort": 80
                     }
                 ]},
             {
