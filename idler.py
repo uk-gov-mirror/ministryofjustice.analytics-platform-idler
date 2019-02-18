@@ -201,7 +201,9 @@ class Service(object):
                 "value": [
                     {
                         "name": "http",
-                        "port": 80
+                        "port": 80,
+                        "protocol": "TCP",
+                        "targetPort": 80
                     }
                 ]},
             {
