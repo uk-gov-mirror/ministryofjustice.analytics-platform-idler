@@ -29,15 +29,16 @@ log_handler.setFormatter(log_formatter)
 log.addHandler(log_handler)
 
 
-ACTIVE_INSTANCE_CPU_PERCENTAGE = 90
+
+CPU_ACTIVITY_THRESHOLD = 90
 try:
-    ACTIVE_INSTANCE_CPU_PERCENTAGE = int(os.environ.get(
-        'RSTUDIO_ACTIVITY_CPU_THRESHOLD', 90))
+    CPU_ACTIVITY_THRESHOLD = int(os.environ.get(
+        'CPU_ACTIVITY_THRESHOLD', CPU_ACTIVITY_THRESHOLD))
     log.debug(
-        f'RSTUDIO_ACTIVITY_CPU_THRESHOLD={ACTIVE_INSTANCE_CPU_PERCENTAGE}%')
+        f'CPU_ACTIVITY_THRESHOLD={CPU_ACTIVITY_THRESHOLD}%')
 except ValueError:
     log.warning(
-        'Invalid value for RSTUDIO_ACTIVITY_CPU_THRESHOLD, using default')
+        f'Invalid value for CPU_ACTIVITY_THRESHOLD, using default ({CPU_ACTIVITY_THRESHOLD}%)')
 
 IDLED = 'mojanalytics.xyz/idled'
 IDLED_AT = 'mojanalytics.xyz/idled-at'
@@ -95,7 +96,7 @@ def eligible_deployments():
 
 
 def label_selector():
-    label_selector = os.environ.get('LABEL_SELECTOR', 'app=rstudio')
+    label_selector = os.environ.get('LABEL_SELECTOR', 'mojanalytics.xyz/idleable=true')
     log.debug(f'LABEL_SELECTOR="{label_selector}"')
     if label_selector:
         label_selector = ',' + label_selector
@@ -113,7 +114,7 @@ def should_idle(deployment):
 
     log.debug(f'{key}: Using {usage}% of CPU')
 
-    if usage > ACTIVE_INSTANCE_CPU_PERCENTAGE:
+    if usage > CPU_ACTIVITY_THRESHOLD:
         log.info(f'{key}: Not idling as using {usage}% of CPU')
         return False
 
