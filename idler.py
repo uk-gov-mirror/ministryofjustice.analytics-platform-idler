@@ -46,6 +46,7 @@ if LABEL_SELECTOR:
 
 IDLED = 'mojanalytics.xyz/idled'
 IDLED_AT = 'mojanalytics.xyz/idled-at'
+REPLICAS_WHEN_UNIDLED = 'mojanalytics.xyz/replicas-when-unidled'
 SERVICE_TYPE_EXTERNAL_NAME = "ExternalName"
 UNIDLER_SERVICE_HOST = "unidler.default.svc.cluster.local"
 
@@ -162,10 +163,10 @@ def idle(deployment):
 
 
 def mark_idled(deployment):
-    timestamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
     deployment.metadata.labels[IDLED] = 'true'
-    deployment.metadata.annotations[IDLED_AT] = (
-        f'{timestamp},{deployment.spec.replicas}')
+    timestamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    deployment.metadata.annotations[IDLED_AT] = timestamp
+    deployment.metadata.annotations[REPLICAS_WHEN_UNIDLED] = deployment.spec.replicas
 
 
 class Service(object):
