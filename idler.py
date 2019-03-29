@@ -29,7 +29,6 @@ log_handler.setFormatter(log_formatter)
 log.addHandler(log_handler)
 
 
-
 CPU_ACTIVITY_THRESHOLD = 90
 try:
     CPU_ACTIVITY_THRESHOLD = int(os.environ.get(
@@ -39,6 +38,11 @@ try:
 except ValueError:
     log.warning(
         f'Invalid value for CPU_ACTIVITY_THRESHOLD, using default ({CPU_ACTIVITY_THRESHOLD}%)')
+
+LABEL_SELECTOR = os.environ.get('LABEL_SELECTOR', 'mojanalytics.xyz/idleable=true')
+log.debug(f'LABEL_SELECTOR="{LABEL_SELECTOR}"')
+if LABEL_SELECTOR:
+    LABEL_SELECTOR = ',' + LABEL_SELECTOR
 
 IDLED = 'mojanalytics.xyz/idled'
 IDLED_AT = 'mojanalytics.xyz/idled-at'
@@ -67,7 +71,7 @@ def get_key(pod_or_deployment):
 
 def build_metrics_lookup():
     metrics = client.MetricsV1beta1Api().list_pod_metrics_for_all_namespaces(
-        label_selector=f'!{IDLED}{label_selector()}')
+        label_selector=f'!{IDLED}{LABEL_SELECTOR}')
 
     for pod_metrics in metrics.items:
         pod_name = pod_metrics.metadata.name
@@ -80,7 +84,7 @@ def build_metrics_lookup():
 
 def build_pods_lookup():
     pods = client.CoreV1Api().list_pod_for_all_namespaces(
-        label_selector=f'!{IDLED}{label_selector()}')
+        label_selector=f'!{IDLED}{LABEL_SELECTOR}')
     for pod in pods.items:
         pods_lookup[(pod.metadata.name, pod.metadata.namespace)] = pod
 
@@ -92,15 +96,7 @@ def build_lookups():
 
 def eligible_deployments():
     return client.AppsV1beta1Api().list_deployment_for_all_namespaces(
-        label_selector=f'!{IDLED}{label_selector()}').items
-
-
-def label_selector():
-    label_selector = os.environ.get('LABEL_SELECTOR', 'mojanalytics.xyz/idleable=true')
-    log.debug(f'LABEL_SELECTOR="{label_selector}"')
-    if label_selector:
-        label_selector = ',' + label_selector
-    return label_selector
+        label_selector=f'!{IDLED}{LABEL_SELECTOR}').items
 
 
 def should_idle(deployment):
