@@ -1,8 +1,12 @@
 """
-Checks all RStudio deployments and idles those matching a kubernetes label
-selector.
-The label selector can be overridden by setting the LABEL_SELECTOR environment
-variable.
+Idles an application to save resources.
+
+Idling is performed by scaling down its deployment to zero replicas (no pods
+running).
+
+Only apps with the given label (`LABEL_SELECTOR`) and that are not using more
+than the given CPU threshold (`CPU_ACTIVITY_THRESHOLD`) will be idled.
+
 See https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
 for label selector syntax.
 """
