@@ -207,10 +207,7 @@ def test_eligible_deployments(client, env):
     ('', f'!{IDLED}'),
 ])
 def test_label_selector(client, env, label_selector, expected):
-    if label_selector:
-        idler.LABEL_SELECTOR = f",{label_selector}"
-    else:
-        idler.LABEL_SELECTOR = label_selector
+    idler.LABEL_SELECTOR = label_selector
 
     idler.eligible_deployments()
 
