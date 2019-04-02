@@ -7,6 +7,7 @@ RUN apk update && apk add --virtual build-dependencies build-base gcc libffi-dev
 
 ADD requirements.txt requirements.txt
 RUN pip install -U pip && pip install -r requirements.txt
+RUN apk del build-dependencies
 
 ADD idler.py idler.py
 ADD metrics_api.py metrics_api.py
@@ -24,5 +25,3 @@ ADD test test
 RUN pytest test
 
 FROM base
-
-RUN apk del build-dependencies
