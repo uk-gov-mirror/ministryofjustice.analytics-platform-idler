@@ -9,18 +9,17 @@ ADD requirements.txt requirements.txt
 RUN pip install -U pip && pip install -r requirements.txt
 RUN apk del build-dependencies
 
-ADD idler.py idler.py
-ADD metrics_api.py metrics_api.py
+COPY idler.py metrics_api.py ./
 
 CMD ["python", "idler.py"]
 
 
 FROM base AS test
 
-ADD test/requirements.txt test/
+COPY test/requirements.txt test/
 RUN pip install -r test/requirements.txt
 
-ADD test test
+COPY test test/
 
 RUN pytest test
 
