@@ -1,4 +1,4 @@
-FROM python:3.6.4-alpine AS base
+FROM python:3.6.8-alpine AS base
 
 MAINTAINER Andy Driver <andy.driver@digital.justice.gov.uk>
 
