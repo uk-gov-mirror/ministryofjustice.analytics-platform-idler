@@ -1,7 +1,7 @@
 """
-Idles an application to save resources.
+Idles applications to save resources.
 
-Idling is performed by scaling down its deployment to zero replicas (no pods
+Idling is performed by scaling down a deployment to zero replicas (no pods
 running).
 
 Only apps with the given label (`LABEL_SELECTOR`) and that are not using more
