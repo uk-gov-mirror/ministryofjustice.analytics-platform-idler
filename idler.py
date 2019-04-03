@@ -144,7 +144,7 @@ def avg_cpu_percent(deployment):
     try:
         metrics = metrics_lookup[key]
     except KeyError as e:
-        log.warning(f'{key}: Metrics not found, pod may be unhealthy.')
+        log.warning(f'{key}: Metrics not found, pod may be unhealthy. Assuming 0% CPU usage.')
         return 0
 
     usage = 0
@@ -172,7 +172,7 @@ def mark_idled(deployment):
     deployment.metadata.labels[IDLED] = 'true'
     timestamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
     deployment.metadata.annotations[IDLED_AT] = timestamp
-    deployment.metadata.annotations[REPLICAS_WHEN_UNIDLED] = deployment.spec.replicas
+    deployment.metadata.annotations[REPLICAS_WHEN_UNIDLED] = str(deployment.spec.replicas)
 
 
 class Service(object):

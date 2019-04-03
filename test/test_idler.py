@@ -248,7 +248,7 @@ def test_avg_cpu_percent(
 
 
 def test_mark_idled(deployment, current_time):
-    expected_replicas = deployment.spec.replicas
+    expected_replicas = str(deployment.spec.replicas)
 
     idler.mark_idled(deployment)
 
