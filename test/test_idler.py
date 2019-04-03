@@ -207,13 +207,12 @@ def test_eligible_deployments(client, env):
     ('', f'!{IDLED}'),
 ])
 def test_label_selector(client, env, label_selector, expected):
-    idler.LABEL_SELECTOR = label_selector
+    with patch('idler.LABEL_SELECTOR', label_selector):
+        idler.eligible_deployments()
 
-    idler.eligible_deployments()
-
-    api = client.AppsV1beta1Api.return_value
-    api.list_deployment_for_all_namespaces.assert_called_with(
-        label_selector=expected)
+        api = client.AppsV1beta1Api.return_value
+        api.list_deployment_for_all_namespaces.assert_called_with(
+            label_selector=expected)
 
 
 def test_should_idle(deployment, env, metrics):
