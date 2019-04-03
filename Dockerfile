@@ -1,6 +1,6 @@
 FROM python:3.6.8-alpine AS base
 
-MAINTAINER Andy Driver <andy.driver@digital.justice.gov.uk>
+LABEL maintainers="andy.driver@digital.justice.gov.uk,aldo.giambelluca@digital.justice.gov.uk"
 
 WORKDIR /home/idler
 RUN apk update && apk add --virtual build-dependencies build-base gcc libffi-dev openssl-dev
