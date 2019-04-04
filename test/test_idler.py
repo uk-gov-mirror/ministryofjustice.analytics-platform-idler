@@ -10,6 +10,7 @@ import idler
 from idler import (
     IDLED,
     IDLED_AT,
+    REPLICAS_WHEN_UNIDLED,
     SERVICE_TYPE_EXTERNAL_NAME,
     UNIDLER_SERVICE_HOST,
 )
@@ -55,7 +56,10 @@ def mock_container(cpu_limit):
 def deployment():
     deployment = MagicMock()
     deployment.metadata.annotations = {}
-    deployment.metadata.labels = {'app': 'rstudio'}
+    deployment.metadata.labels = {
+        'app': 'rstudio',
+        'mojanalytics.xyz/idleable': 'true',
+    }
     deployment.metadata.namespace = 'user-alice'
     deployment.spec.replicas = 2
     deployment.spec.template.spec.containers = [
@@ -192,7 +196,7 @@ def test_eligible_deployments(client, env):
     deployments = idler.eligible_deployments()
     api = client.AppsV1beta1Api.return_value
     api.list_deployment_for_all_namespaces.assert_called_with(
-        label_selector=f'!{IDLED},app=rstudio')
+        label_selector=f'!{IDLED},mojanalytics.xyz/idleable=true')
     assert len(list(deployments)) > 0
 
 
@@ -203,11 +207,12 @@ def test_eligible_deployments(client, env):
     ('', f'!{IDLED}'),
 ])
 def test_label_selector(client, env, label_selector, expected):
-    env['LABEL_SELECTOR'] = label_selector
-    idler.eligible_deployments()
-    api = client.AppsV1beta1Api.return_value
-    api.list_deployment_for_all_namespaces.assert_called_with(
-        label_selector=expected)
+    with patch('idler.LABEL_SELECTOR', label_selector):
+        idler.eligible_deployments()
+
+        api = client.AppsV1beta1Api.return_value
+        api.list_deployment_for_all_namespaces.assert_called_with(
+            label_selector=expected)
 
 
 def test_should_idle(deployment, env, metrics):
@@ -243,15 +248,14 @@ def test_avg_cpu_percent(
 
 
 def test_mark_idled(deployment, current_time):
-    expected_replicas = deployment.spec.replicas
+    expected_replicas = str(deployment.spec.replicas)
 
     idler.mark_idled(deployment)
 
     assert IDLED in deployment.metadata.labels
     assert IDLED_AT in deployment.metadata.annotations
-    timestamp, replicas = deployment.metadata.annotations[IDLED_AT].split(',')
-    assert int(replicas) == expected_replicas
-    assert timestamp == current_time.isoformat(timespec='seconds')
+    assert current_time.isoformat(timespec='seconds') == deployment.metadata.annotations[IDLED_AT]
+    assert expected_replicas == deployment.metadata.annotations[REPLICAS_WHEN_UNIDLED]
 
 
 def test_zero_replicas(deployment):

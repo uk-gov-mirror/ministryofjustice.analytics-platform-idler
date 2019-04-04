@@ -1,28 +1,35 @@
-FROM python:3.6.4-alpine AS base
+# Stage: base
+FROM python:3.6.8-alpine AS base
 
-MAINTAINER Andy Driver <andy.driver@digital.justice.gov.uk>
+LABEL maintainers="andy.driver@digital.justice.gov.uk,aldo.giambelluca@digital.justice.gov.uk"
 
 WORKDIR /home/idler
-RUN apk update && apk add --virtual build-dependencies build-base gcc libffi-dev openssl-dev
+
+RUN adduser -D -u 4242 idler
 
 ADD requirements.txt requirements.txt
-RUN pip install -U pip && pip install -r requirements.txt
+RUN apk update && \
+    apk add --virtual build-dependencies build-base gcc libffi-dev openssl-dev && \
+    pip install -U pip && \
+    pip install -r requirements.txt && \
+    apk del build-dependencies
 
-ADD idler.py idler.py
-ADD metrics_api.py metrics_api.py
+COPY idler.py metrics_api.py ./
+RUN chown -R idler:idler .
 
 CMD ["python", "idler.py"]
 
 
+# Stage: test
 FROM base AS test
 
-ADD test/requirements.txt test/
+COPY test/requirements.txt test/
 RUN pip install -r test/requirements.txt
 
-ADD test test
-
+COPY test test/
 RUN pytest test
 
-FROM base
 
-RUN apk del build-dependencies
+# Stage: final
+FROM base
+USER idler

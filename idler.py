@@ -1,8 +1,12 @@
 """
-Checks all RStudio deployments and idles those matching a kubernetes label
-selector.
-The label selector can be overridden by setting the LABEL_SELECTOR environment
-variable.
+Idles applications to save resources.
+
+Idling is performed by scaling down a deployment to zero replicas (no pods
+running).
+
+Only apps with the given label (`LABEL_SELECTOR`) and that are not using more
+than the given CPU threshold (`CPU_ACTIVITY_THRESHOLD`) will be idled.
+
 See https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
 for label selector syntax.
 """
@@ -29,18 +33,22 @@ log_handler.setFormatter(log_formatter)
 log.addHandler(log_handler)
 
 
-ACTIVE_INSTANCE_CPU_PERCENTAGE = 90
+CPU_ACTIVITY_THRESHOLD = 90
 try:
-    ACTIVE_INSTANCE_CPU_PERCENTAGE = int(os.environ.get(
-        'RSTUDIO_ACTIVITY_CPU_THRESHOLD', 90))
+    CPU_ACTIVITY_THRESHOLD = int(os.environ.get(
+        'CPU_ACTIVITY_THRESHOLD', CPU_ACTIVITY_THRESHOLD))
     log.debug(
-        f'RSTUDIO_ACTIVITY_CPU_THRESHOLD={ACTIVE_INSTANCE_CPU_PERCENTAGE}%')
+        f'CPU_ACTIVITY_THRESHOLD={CPU_ACTIVITY_THRESHOLD}%')
 except ValueError:
     log.warning(
-        'Invalid value for RSTUDIO_ACTIVITY_CPU_THRESHOLD, using default')
+        f'Invalid value for CPU_ACTIVITY_THRESHOLD, using default ({CPU_ACTIVITY_THRESHOLD}%)')
+
+LABEL_SELECTOR = os.environ.get('LABEL_SELECTOR', 'mojanalytics.xyz/idleable=true').strip()
+log.debug(f'LABEL_SELECTOR="{LABEL_SELECTOR}"')
 
 IDLED = 'mojanalytics.xyz/idled'
 IDLED_AT = 'mojanalytics.xyz/idled-at'
+REPLICAS_WHEN_UNIDLED = 'mojanalytics.xyz/replicas-when-unidled'
 SERVICE_TYPE_EXTERNAL_NAME = "ExternalName"
 UNIDLER_SERVICE_HOST = "unidler.default.svc.cluster.local"
 
@@ -66,9 +74,10 @@ def get_key(pod_or_deployment):
 
 def build_metrics_lookup():
     metrics = client.MetricsV1beta1Api().list_pod_metrics_for_all_namespaces(
-        label_selector=f'!{IDLED}{label_selector()}')
+        label_selector=LABEL_SELECTOR).items
+    log.debug(f"{len(metrics)} metrics found matching the '{LABEL_SELECTOR}' label selector.")
 
-    for pod_metrics in metrics.items:
+    for pod_metrics in metrics:
         pod_name = pod_metrics.metadata.name
         namespace = pod_metrics.metadata.namespace
         pod = pods_lookup[(pod_name, namespace)]
@@ -79,8 +88,10 @@ def build_metrics_lookup():
 
 def build_pods_lookup():
     pods = client.CoreV1Api().list_pod_for_all_namespaces(
-        label_selector=f'!{IDLED}{label_selector()}')
-    for pod in pods.items:
+        label_selector=LABEL_SELECTOR).items
+    log.debug(f"{len(pods)} pods found matching the '{LABEL_SELECTOR}' label selector.")
+
+    for pod in pods:
         pods_lookup[(pod.metadata.name, pod.metadata.namespace)] = pod
 
 
@@ -90,16 +101,15 @@ def build_lookups():
 
 
 def eligible_deployments():
-    return client.AppsV1beta1Api().list_deployment_for_all_namespaces(
-        label_selector=f'!{IDLED}{label_selector()}').items
+    selector = f"!{IDLED}"
+    if LABEL_SELECTOR:
+        selector = f"{selector},{LABEL_SELECTOR}"
 
+    deployments = client.AppsV1beta1Api().list_deployment_for_all_namespaces(
+        label_selector=selector).items
+    log.debug(f"{len(deployments)} deployments found matching the '{selector}' label selector.")
 
-def label_selector():
-    label_selector = os.environ.get('LABEL_SELECTOR', 'app=rstudio')
-    log.debug(f'LABEL_SELECTOR="{label_selector}"')
-    if label_selector:
-        label_selector = ',' + label_selector
-    return label_selector
+    return deployments
 
 
 def should_idle(deployment):
@@ -113,10 +123,11 @@ def should_idle(deployment):
 
     log.debug(f'{key}: Using {usage}% of CPU')
 
-    if usage > ACTIVE_INSTANCE_CPU_PERCENTAGE:
-        log.info(f'{key}: Not idling as using {usage}% of CPU')
+    if usage > CPU_ACTIVITY_THRESHOLD:
+        log.info(f"{key}: will not be idled as it's using {usage}% of CPU.")
         return False
 
+    log.debug(f"{key}: will be idled.")
     return True
 
 
@@ -140,7 +151,7 @@ def avg_cpu_percent(deployment):
     try:
         metrics = metrics_lookup[key]
     except KeyError as e:
-        log.warning(f'{key}: Metrics not found, pod may be unhealthy.')
+        log.warning(f'{key}: Metrics not found, pod may be unhealthy. Assuming 0% CPU usage.')
         return 0
 
     usage = 0
@@ -155,20 +166,28 @@ def avg_cpu_percent(deployment):
 
 
 def idle(deployment):
-    mark_idled(deployment)
-    svc = Service(deployment.metadata.name, deployment.metadata.namespace)
-    svc.redirect_to_unidler()
-    zero_replicas(deployment)
-    write_changes(deployment)
+    key = get_key(deployment)
 
-    log.debug(f'{get_key(deployment)}: Idled')
+    mark_idled(deployment)
+    log.debug(f'{key}: Deployment marked as idled (added labels and annotations).')
+
+    svc = Service(deployment.metadata.name, deployment.metadata.namespace)
+
+    svc.redirect_to_unidler()
+    log.debug(f'{key}: Service pointed to unidler (set ServiceType to ExternalName, etc).')
+
+    zero_replicas(deployment)
+    log.debug(f'{key}: Deployment replicas set to 0.')
+
+    write_changes(deployment)
+    log.debug(f'{key}: Deployment changes written. App is now idled.')
 
 
 def mark_idled(deployment):
-    timestamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
     deployment.metadata.labels[IDLED] = 'true'
-    deployment.metadata.annotations[IDLED_AT] = (
-        f'{timestamp},{deployment.spec.replicas}')
+    timestamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    deployment.metadata.annotations[IDLED_AT] = timestamp
+    deployment.metadata.annotations[REPLICAS_WHEN_UNIDLED] = str(deployment.spec.replicas)
 
 
 class Service(object):
@@ -225,13 +244,16 @@ def write_changes(deployment):
         deployment)
 
 
+
 def load_kube_config():
     try:
         config.load_incluster_config()
+        log.debug("Kubernetes configuration loaded from within the cluster.")
     except config.ConfigException:
         # monkeypatch config loader to handle OIDC
         import k8s_oidc
         config.load_kube_config()
+        log.debug("Kubernetes configuration loaded from kube_config file.")
 
 
 if __name__ == '__main__':
