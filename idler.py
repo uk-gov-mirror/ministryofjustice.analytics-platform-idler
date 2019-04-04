@@ -74,9 +74,10 @@ def get_key(pod_or_deployment):
 
 def build_metrics_lookup():
     metrics = client.MetricsV1beta1Api().list_pod_metrics_for_all_namespaces(
-        label_selector=LABEL_SELECTOR)
+        label_selector=LABEL_SELECTOR).items
+    log.debug(f"{len(metrics)} metrics found matching the '{LABEL_SELECTOR}' label selector.")
 
-    for pod_metrics in metrics.items:
+    for pod_metrics in metrics:
         pod_name = pod_metrics.metadata.name
         namespace = pod_metrics.metadata.namespace
         pod = pods_lookup[(pod_name, namespace)]
@@ -87,8 +88,10 @@ def build_metrics_lookup():
 
 def build_pods_lookup():
     pods = client.CoreV1Api().list_pod_for_all_namespaces(
-        label_selector=LABEL_SELECTOR)
-    for pod in pods.items:
+        label_selector=LABEL_SELECTOR).items
+    log.debug(f"{len(pods)} pods found matching the '{LABEL_SELECTOR}' label selector.")
+
+    for pod in pods:
         pods_lookup[(pod.metadata.name, pod.metadata.namespace)] = pod
 
 
@@ -102,8 +105,11 @@ def eligible_deployments():
     if LABEL_SELECTOR:
         selector = f"{selector},{LABEL_SELECTOR}"
 
-    return client.AppsV1beta1Api().list_deployment_for_all_namespaces(
+    deployments = client.AppsV1beta1Api().list_deployment_for_all_namespaces(
         label_selector=selector).items
+    log.debug(f"{len(deployments)} deployments found matching the '{selector}' label selector.")
+
+    return deployments
 
 
 def should_idle(deployment):
@@ -118,9 +124,10 @@ def should_idle(deployment):
     log.debug(f'{key}: Using {usage}% of CPU')
 
     if usage > CPU_ACTIVITY_THRESHOLD:
-        log.info(f'{key}: Not idling as using {usage}% of CPU')
+        log.info(f"{key}: will not be idled as it's using {usage}% of CPU.")
         return False
 
+    log.debug(f"{key}: will be idled.")
     return True
 
 
@@ -159,13 +166,21 @@ def avg_cpu_percent(deployment):
 
 
 def idle(deployment):
-    mark_idled(deployment)
-    svc = Service(deployment.metadata.name, deployment.metadata.namespace)
-    svc.redirect_to_unidler()
-    zero_replicas(deployment)
-    write_changes(deployment)
+    key = get_key(deployment)
 
-    log.debug(f'{get_key(deployment)}: Idled')
+    mark_idled(deployment)
+    log.debug(f'{key}: Deployment marked as idled (added labels and annotations).')
+
+    svc = Service(deployment.metadata.name, deployment.metadata.namespace)
+
+    svc.redirect_to_unidler()
+    log.debug(f'{key}: Service pointed to unidler (set ServiceType to ExternalName, etc).')
+
+    zero_replicas(deployment)
+    log.debug(f'{key}: Deployment replicas set to 0.')
+
+    write_changes(deployment)
+    log.debug(f'{key}: Deployment changes written. App is now idled.')
 
 
 def mark_idled(deployment):
@@ -229,13 +244,16 @@ def write_changes(deployment):
         deployment)
 
 
+
 def load_kube_config():
     try:
         config.load_incluster_config()
+        log.debug("Kubernetes configuration loaded from within the cluster.")
     except config.ConfigException:
         # monkeypatch config loader to handle OIDC
         import k8s_oidc
         config.load_kube_config()
+        log.debug("Kubernetes configuration loaded from kube_config file.")
 
 
 if __name__ == '__main__':
