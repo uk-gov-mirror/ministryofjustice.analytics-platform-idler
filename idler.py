@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import os
+from sys import exit
 
 from kubernetes import client, config
 
@@ -60,9 +61,20 @@ pods_lookup = {}
 def idle_deployments():
     build_lookups()
 
+    failed = []
     for deployment in eligible_deployments():
-        if should_idle(deployment):
-            idle(deployment)
+        try:
+            if should_idle(deployment):
+                idle(deployment)
+        except Exception as e:
+            deploy_id = f"({deployment.metadata.namespace}, {deployment.metadata.name})"
+            log.error(f"Failed to idle {deploy_id} deployment: {e}")
+            failed.append(deploy_id)
+
+    if failed:
+        failed_deployments = "\n".join(failed)
+        log.error(f"Failed to idle following deployments:\n {failed_deployments}")
+        exit(1)
 
 
 def get_key(pod_or_deployment):
