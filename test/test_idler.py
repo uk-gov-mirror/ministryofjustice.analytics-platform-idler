@@ -164,32 +164,23 @@ def test_idle_deployments(client, deployment, env, metrics):
     core_api.patch_namespaced_service.assert_called_with(
         name=deployment.metadata.name,
         namespace=deployment.metadata.namespace,
-        body=[
-            {
-                "op": "replace",
-                "path": "/spec/type",
-                "value": SERVICE_TYPE_EXTERNAL_NAME},
-            {
-                "op": "add",
-                "path": "/spec/externalName",
-                "value": UNIDLER_SERVICE_HOST},
-            {
-                "op": "replace",
-                "path": "/spec/ports",
-                "value": [
+        body={
+            "spec": {
+                "selector": None, # remove
+                "clusterIP": None, # remove
+                "type": SERVICE_TYPE_EXTERNAL_NAME,
+                "externalName": UNIDLER_SERVICE_HOST,
+                "ports": [
                     {
                         "name": "http",
                         "port": 80,
                         "protocol": "TCP",
                         "targetPort": 80
                     }
-                ]},
-            {
-                "op": "remove",
-                "path": "/spec/selector"},
-            {
-                "op": "remove",
-                "path": "/spec/clusterIP"}])
+                ]
+            }
+        }
+    )
 
 
 def test_eligible_deployments(client, env):
