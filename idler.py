@@ -180,45 +180,23 @@ def avg_cpu_percent(deployment):
 def idle(deployment):
     key = get_key(deployment)
 
-    mark_idled(deployment)
-    log.debug(f'{key}: Deployment marked as idled (added labels and annotations).')
+    app = App(deployment.metadata.name, deployment.metadata.namespace)
 
-    svc = Service(deployment.metadata.name, deployment.metadata.namespace)
-
-    svc.redirect_to_unidler()
+    app.redirect_to_unidler()
     log.debug(f'{key}: Service pointed to unidler (set ServiceType to ExternalName, etc).')
 
-    zero_replicas(deployment)
-    log.debug(f'{key}: Deployment replicas set to 0.')
-
-    write_changes(deployment)
-    log.debug(f'{key}: Deployment changes written. App is now idled.')
+    app.scale_to_zero(replicas_when_unidled=deployment.spec.replicas)
+    log.debug(f'{key}: Deployment idled: Set replicas to 0, added labels and annotations.')
 
 
-def mark_idled(deployment):
-    deployment.metadata.labels[IDLED] = 'true'
-    timestamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
-    deployment.metadata.annotations[IDLED_AT] = timestamp
-    deployment.metadata.annotations[REPLICAS_WHEN_UNIDLED] = str(deployment.spec.replicas)
-
-
-class Service(object):
+class App(object):
 
     def __init__(self, name, namespace):
         self.name = name
         self.namespace = namespace
-        self.service = client.CoreV1Api().read_namespaced_service(
-            name, namespace)
-
-    def patch(self, patch):
-        client.CoreV1Api().patch_namespaced_service(
-            name=self.name,
-            namespace=self.namespace,
-            body=patch,
-        )
 
     def redirect_to_unidler(self):
-        self.patch({
+        patch = {
             "spec": {
                 "selector": None, # remove
                 "clusterIP": None, # remove
@@ -233,19 +211,37 @@ class Service(object):
                     }
                 ]
             }
-        })
+        }
 
+        client.CoreV1Api().patch_namespaced_service(
+            name=self.name,
+            namespace=self.namespace,
+            body=patch,
+        )
 
-def zero_replicas(deployment):
-    deployment.spec.replicas = 0
+    def scale_to_zero(self, replicas_when_unidled=1):
+        idled_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
 
+        patch = {
+            "spec": {
+                "replicas": 0
+            },
+            "metadata": {
+                "labels": {
+                    IDLED: "true",
+                },
+                "annotations": {
+                    IDLED_AT: idled_at,
+                    REPLICAS_WHEN_UNIDLED: str(replicas_when_unidled),
+                },
+            },
+        }
 
-def write_changes(deployment):
-    client.AppsV1beta1Api().patch_namespaced_deployment(
-        deployment.metadata.name,
-        deployment.metadata.namespace,
-        deployment)
-
+        client.AppsV1beta1Api().patch_namespaced_deployment(
+            self.name,
+            self.namespace,
+            body=patch,
+        )
 
 
 def load_kube_config():
