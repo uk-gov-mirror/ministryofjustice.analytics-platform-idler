@@ -1,5 +1,5 @@
 # Stage: base
-FROM python:3.6.8-alpine AS base
+FROM python:3.7-alpine AS base
 
 LABEL maintainers="andy.driver@digital.justice.gov.uk,aldo.giambelluca@digital.justice.gov.uk"
 
