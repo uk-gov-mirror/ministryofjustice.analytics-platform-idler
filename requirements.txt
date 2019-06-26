@@ -1,1 +1,3 @@
-kubernetes==7.0.0
+# See Compatibility matrix:
+#   https://github.com/kubernetes-client/python#compatibility
+kubernetes==9.0.0

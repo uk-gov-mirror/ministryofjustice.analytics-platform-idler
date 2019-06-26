@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import os
+from sys import exit
 
 from kubernetes import client, config
 
@@ -60,9 +61,20 @@ pods_lookup = {}
 def idle_deployments():
     build_lookups()
 
+    failed = []
     for deployment in eligible_deployments():
-        if should_idle(deployment):
-            idle(deployment)
+        try:
+            if should_idle(deployment):
+                idle(deployment)
+        except Exception as e:
+            deploy_id = f"({deployment.metadata.namespace}, {deployment.metadata.name})"
+            log.error(f"Failed to idle {deploy_id} deployment: {e}")
+            failed.append(deploy_id)
+
+    if failed:
+        failed_deployments = "\n".join(failed)
+        log.error(f"Failed to idle following deployments:\n {failed_deployments}")
+        exit(1)
 
 
 def get_key(pod_or_deployment):
@@ -168,81 +180,68 @@ def avg_cpu_percent(deployment):
 def idle(deployment):
     key = get_key(deployment)
 
-    mark_idled(deployment)
-    log.debug(f'{key}: Deployment marked as idled (added labels and annotations).')
+    app = App(deployment.metadata.name, deployment.metadata.namespace)
 
-    svc = Service(deployment.metadata.name, deployment.metadata.namespace)
-
-    svc.redirect_to_unidler()
+    app.redirect_to_unidler()
     log.debug(f'{key}: Service pointed to unidler (set ServiceType to ExternalName, etc).')
 
-    zero_replicas(deployment)
-    log.debug(f'{key}: Deployment replicas set to 0.')
-
-    write_changes(deployment)
-    log.debug(f'{key}: Deployment changes written. App is now idled.')
+    app.scale_to_zero(replicas_when_unidled=deployment.spec.replicas)
+    log.debug(f'{key}: Deployment idled: Set replicas to 0, added labels and annotations.')
 
 
-def mark_idled(deployment):
-    deployment.metadata.labels[IDLED] = 'true'
-    timestamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
-    deployment.metadata.annotations[IDLED_AT] = timestamp
-    deployment.metadata.annotations[REPLICAS_WHEN_UNIDLED] = str(deployment.spec.replicas)
-
-
-class Service(object):
+class App(object):
 
     def __init__(self, name, namespace):
         self.name = name
         self.namespace = namespace
-        self.service = client.CoreV1Api().read_namespaced_service(
-            name, namespace)
-
-    def patch(self, *patch):
-        client.CoreV1Api().patch_namespaced_service(
-            name=self.name,
-            namespace=self.namespace,
-            body=list(patch))
 
     def redirect_to_unidler(self):
-        self.patch(
-            {
-                "op": "replace",
-                "path": "/spec/type",
-                "value": SERVICE_TYPE_EXTERNAL_NAME},
-            {
-                "op": "add",
-                "path": "/spec/externalName",
-                "value": UNIDLER_SERVICE_HOST},
-            {
-                "op": "replace",
-                "path": "/spec/ports",
-                "value": [
+        patch = {
+            "spec": {
+                "selector": None, # remove
+                "clusterIP": None, # remove
+                "type": SERVICE_TYPE_EXTERNAL_NAME,
+                "externalName": UNIDLER_SERVICE_HOST,
+                "ports": [
                     {
                         "name": "http",
                         "port": 80,
                         "protocol": "TCP",
                         "targetPort": 80
                     }
-                ]},
-            {
-                "op": "remove",
-                "path": "/spec/selector"},
-            {
-                "op": "remove",
-                "path": "/spec/clusterIP"})
+                ]
+            }
+        }
 
+        client.CoreV1Api().patch_namespaced_service(
+            name=self.name,
+            namespace=self.namespace,
+            body=patch,
+        )
 
-def zero_replicas(deployment):
-    deployment.spec.replicas = 0
+    def scale_to_zero(self, replicas_when_unidled=1):
+        idled_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
 
+        patch = {
+            "spec": {
+                "replicas": 0
+            },
+            "metadata": {
+                "labels": {
+                    IDLED: "true",
+                },
+                "annotations": {
+                    IDLED_AT: idled_at,
+                    REPLICAS_WHEN_UNIDLED: str(replicas_when_unidled),
+                },
+            },
+        }
 
-def write_changes(deployment):
-    client.AppsV1beta1Api().patch_namespaced_deployment(
-        deployment.metadata.name,
-        deployment.metadata.namespace,
-        deployment)
-
+        client.AppsV1beta1Api().patch_namespaced_deployment(
+            self.name,
+            self.namespace,
+            body=patch,
+        )
 
 
 def load_kube_config():

@@ -146,50 +146,51 @@ def pods_lookup(pod):
         yield cache
 
 
-def test_idle_deployments(client, deployment, env, metrics):
+def test_idle_deployments(client, deployment, env, metrics, current_time):
     core_api = client.CoreV1Api.return_value
     apps_api = client.AppsV1beta1Api.return_value
 
     idler.idle_deployments()
 
-    apps_api.patch_namespaced_deployment.assert_called_with(
-        deployment.metadata.name,
-        deployment.metadata.namespace,
-        deployment)
-
-    core_api.read_namespaced_service.assert_called_with(
-        deployment.metadata.name,
-        deployment.metadata.namespace)
-
     core_api.patch_namespaced_service.assert_called_with(
         name=deployment.metadata.name,
         namespace=deployment.metadata.namespace,
-        body=[
-            {
-                "op": "replace",
-                "path": "/spec/type",
-                "value": SERVICE_TYPE_EXTERNAL_NAME},
-            {
-                "op": "add",
-                "path": "/spec/externalName",
-                "value": UNIDLER_SERVICE_HOST},
-            {
-                "op": "replace",
-                "path": "/spec/ports",
-                "value": [
+        body={
+            "spec": {
+                "selector": None, # remove
+                "clusterIP": None, # remove
+                "type": SERVICE_TYPE_EXTERNAL_NAME,
+                "externalName": UNIDLER_SERVICE_HOST,
+                "ports": [
                     {
                         "name": "http",
                         "port": 80,
                         "protocol": "TCP",
                         "targetPort": 80
                     }
-                ]},
-            {
-                "op": "remove",
-                "path": "/spec/selector"},
-            {
-                "op": "remove",
-                "path": "/spec/clusterIP"}])
+                ]
+            }
+        }
+    )
+
+    apps_api.patch_namespaced_deployment.assert_called_with(
+        deployment.metadata.name,
+        deployment.metadata.namespace,
+        body={
+            "spec": {
+                "replicas": 0
+            },
+            "metadata": {
+                "labels": {
+                    IDLED: "true",
+                },
+                "annotations": {
+                    IDLED_AT: current_time.isoformat(timespec='seconds'),
+                    REPLICAS_WHEN_UNIDLED: "2",
+                },
+            },
+        }
+    )
 
 
 def test_eligible_deployments(client, env):
@@ -245,31 +246,3 @@ def test_avg_cpu_percent(
     key = (deployment.metadata.labels['app'], deployment.metadata.namespace)
     metrics[key] = mock_podmetric(cpu_usage)
     assert idler.avg_cpu_percent(deployment) == expected
-
-
-def test_mark_idled(deployment, current_time):
-    expected_replicas = str(deployment.spec.replicas)
-
-    idler.mark_idled(deployment)
-
-    assert IDLED in deployment.metadata.labels
-    assert IDLED_AT in deployment.metadata.annotations
-    assert current_time.isoformat(timespec='seconds') == deployment.metadata.annotations[IDLED_AT]
-    assert expected_replicas == deployment.metadata.annotations[REPLICAS_WHEN_UNIDLED]
-
-
-def test_zero_replicas(deployment):
-    idler.zero_replicas(deployment)
-
-    assert deployment.spec.replicas == 0
-
-
-def test_write_changes(client, deployment):
-    idler.write_changes(deployment)
-
-    api = client.AppsV1beta1Api.return_value
-    api.patch_namespaced_deployment.assert_called_with(
-        deployment.metadata.name,
-        deployment.metadata.namespace,
-        deployment
-    )
