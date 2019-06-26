@@ -28,5 +28,4 @@ jobs:
       - run:
           name: run tests
           command: |
-            . venv/bin/activate
-            pytest
+            venv/bin/pytest
