@@ -1,3 +1,5 @@
+[![Docker Repository on Quay](https://quay.io/repository/mojanalytics/idler/status "Docker Repository on Quay")](https://quay.io/repository/mojanalytics/idler)
+
 # Idler
 Periodically idles Kubernetes deployments meeting certain criteria to avoid wasting money
 
