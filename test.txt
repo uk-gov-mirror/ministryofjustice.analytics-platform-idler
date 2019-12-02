@@ -1,0 +1,9 @@
+Testing hub
+
+```sh
+$ hub pull-request
+```
+
+is supposed to create a pull request...
+
+SEE: https://hub.github.com/hub-pull-request.1.html
