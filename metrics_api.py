@@ -68,7 +68,7 @@ class MetricsV1beta1Api(object):
             collection_formats=collection_formats)
 
 
-kubernetes.client.apis.MetricsV1beta1Api = MetricsV1beta1Api
+kubernetes.client.api.MetricsV1beta1Api = MetricsV1beta1Api
 kubernetes.client.MetricsV1beta1Api = MetricsV1beta1Api
 
 
@@ -76,7 +76,7 @@ class Model(object):
 
     def to_dict(self):
         result = {}
-        for attr, _ in iteritems(self.swagger_types):
+        for attr, _ in iteritems(self.openapi_types):
             value = getattr(self, attr)
             if isinstance(value, list):
                 result[attr] = list(map(
@@ -113,7 +113,7 @@ class Model(object):
 
 
 class MetricsV1beta1PodMetricsList(Model):
-    swagger_types = {
+    openapi_types = {
         'api_version': 'str',
         'items': 'list[MetricsV1beta1PodMetrics]',
         'kind': 'str',
@@ -141,7 +141,7 @@ kubernetes.client.MetricsV1beta1PodMetricsList = MetricsV1beta1PodMetricsList
 
 
 class MetricsV1beta1PodMetrics(Model):
-    swagger_types = {
+    openapi_types = {
         'containers': 'list[MetricsV1beta1ContainerMetrics]',
         'metadata': 'V1ObjectMeta',
         'timestamp': 'datetime',
@@ -167,7 +167,7 @@ kubernetes.client.MetricsV1beta1PodMetrics = MetricsV1beta1PodMetrics
 
 
 class MetricsV1beta1ContainerMetrics(Model):
-    swagger_types = {
+    openapi_types = {
         'name': 'str',
         'usage': 'dict(str, str)',
     }
